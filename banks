@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>تفکیک بانک‌ها — نسخه نهایی</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body{font-family:Tahoma;background:#f0f7fb;padding:20px;text-align:center}
+    .box{max-width:700px;margin:30px auto;background:white;padding:40px;border-radius:20px;box-shadow:0 15px 50px rgba(0,0,0,0.2)}
+    h1{color:#1e40af}
+    input,button{margin:15px 0;padding:18px;font-size:18px;width:100%;border-radius:12px;border:none}
+    input[type=file]{border:3px dashed #3b82f6;background:#f8faff;cursor:pointer}
+    input[type=text]{border:2px solid #93c5fd;background:#fff}
+    button{background:#1d4ed8;color:white;font-weight:bold;cursor:pointer}
+    button:hover{background:#1e3a8a}
+    .result{margin-top:25px;padding:20px;border-radius:12px;font-size:19px;line-height:2}
+    .success{background:#d1fae5;color:#065f46}
+    .loader{margin:20px;padding:25px;background:#dbeafe;color:#1e40af;border-radius:12px;display:none;font-size:18px}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>تفکیک مانده بانک‌ها — نسخه نهایی ۱۰۰٪</h1>
+    <p>همه بانک‌ها (کارآفرین، ملت، گردشگری، پاسارگاد، صادرات، ملی و ...) شناسایی می‌شن</p>
+
+    <input type="file" id="fileInput" accept=".xlsx,.xls" />
+    <input type="text" id="aumInput" placeholder="مبلغ AUM (مثال: 1500000000000)" />
+    <button onclick="processFile()">شروع پردازش</button>
+
+    <div id="loader" class="loader">در حال پردازش فایل...</div>
+    <div id="result" class="result"></div>
+  </div>
+
+  <script>
+    const bankPatterns = [
+      {name: "بانک کارآفرین", patterns: [/کارآفرین|كارآفرين|karafarin|karaf/i]},
+      {name: "بانک ملت", patterns: [/ملت|بانک ملت|نزد ملت/i]},
+      {name: "بانک گردشگری", patterns: [/گردشگری/i]},
+      {name: "بانک پاسارگاد", patterns: [/پاسارگاد|pasargad/i]},
+      {name: "بانک صادرات", patterns: [/صادرات|بانک صادرات/i]},
+      {name: "بانک ملی", patterns: [/ملی|ملّی|بانک ملی/i]},
+      {name: "بانک دی", patterns: [/دی|بانک دی/i]},
+      {name: "بانک آینده", patterns: [/آینده/i]},
+      {name: "بانک سپه", patterns: [/سپه/i]},
+      {name: "بانک ایران زمین", patterns: [/ایران زمین|ايران زمين/i]},
+      {name: "بانک تجارت", patterns: [/تجارت/i]},
+      {name: "بانک شهر", patterns: [/شهر/i]},
+      {name: "موسسه ملل", patterns: [/ملل|يونيتي|یونیتی/i]},
+      {name: "بانک اقتصاد نوین", patterns: [/اقتصاد نوین/i]},
+      {name: "بانک مسکن", patterns: [/مسکن|مسكن/i]},
+      {name: "بانک رفاه", patterns: [/رفاه/i]},
+      {name: "بانک خاورمیانه", patterns: [/خاورمیانه/i]}
+    ];
+
+    function detectBank(t) {
+      t = " " + t.toLowerCase() + " ";
+      for (const b of bankPatterns) if (b.patterns.some(p => p.test(t))) return b.name;
+      return null;
+    }
+
+    function processFile() {
+      const file = document.getElementById("fileInput").files[0];
+      const aum = parseFloat(document.getElementById("aumInput").value.replace(/,/g,'')) || 0;
+      const result = document.getElementById("result");
+      const loader = document.getElementById("loader");
+      result.innerHTML = ""; loader.style.display = "block";
+
+      if (!file || aum <= 0) { alert("فایل و AUM رو درست وارد کن"); loader.style.display="none"; return; }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const wb = XLSX.read(e.target.result, {type:"array"});
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1}).slice(12);
+          const header = rows[0];
+          const titleIdx = header.findIndex(h => /عنوان حساب/.test(String(h)));
+          const balanceIdx = header.findIndex(h => /مانده|بدهکار/.test(String(h)));
+
+          if (titleIdx === -1) throw new Error("ستون عنوان حساب پیدا نشد");
+
+          const bankRows = [];
+          let total = 0;
+          rows.slice(1).forEach(r => {
+            const title = String(r[titleIdx]||"");
+            const amount = parseFloat(r[balanceIdx]) || 0;
+            if (/جمع کل|جمع/.test(title)) total += amount;
+            const bank = detectBank(title);
+            if (bank) bankRows.push({"مانده بدهکار":amount, "عنوان حساب":title, "بانک":bank});
+          });
+          if (total === 0) total = bankRows.reduce((s,r)=>s+r["مانده بدهکار"],0);
+
+          const out = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(out, XLSX.utils.json_to_sheet(rows.slice(1).map(r=>Object.fromEntries(header.map((h,i)=>[h||`ستون${i+1}`,r[i]])))), "تمام حساب‌ها");
+          XLSX.utils.book_append_sheet(out, XLSX.utils.json_to_sheet(bankRows), "بانک‌ها");
+          const sum = {}; bankRows.forEach(r=>sum[r.بانک]=(sum[r.بانک]||0)+r["مانده بدهکار"]);
+          const summary = Object.entries(sum).map(([b,s])=>({بانک:b,"جمع مانده":s,نصاب:s/aum})).sort((a,b)=>b["جمع مانده"]-a["جمع مانده"]);
+          XLSX.utils.book_append_sheet(out, XLSX.utils.json_to_sheet(summary), "جمع‌بندی");
+          XLSX.writeFile(out, "بانک‌ها_تفکیک‌شده.xlsx");
+
+          result.className="result success";
+          result.innerHTML=`تمام شد!<br>تعداد حساب بانکی: <b>${bankRows.length}</b><br>جمع مانده: <b>${total.toLocaleString()}</b><br>نصاب کل: <b>${(total/aum*100).toFixed(4)}%</b>`;
+        } catch(err) {
+          result.className="result error";
+          result.innerHTML="خطا: "+err.message;
+        } finally { loader.style.display="none"; }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  </script>
+</body>
+</html>
